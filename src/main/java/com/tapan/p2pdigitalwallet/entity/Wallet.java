@@ -30,7 +30,7 @@ public class Wallet {
     @Column(name = "account_number", nullable = false, length = 12, updatable = false )
     private String accountNumber;
 
-    @Column(name = "balance", nullable = false, precision = 19, scale = 4)
+    @Column(name = "balance", nullable = false, precision = 19, scale = 2)
     private BigDecimal balance;
 
     @Enumerated(EnumType.STRING)
