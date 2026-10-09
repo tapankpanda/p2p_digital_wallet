@@ -100,4 +100,7 @@ public class Wallet {
     }
 
 
+    public Long getId() {
+        return id;
+    }
 }
