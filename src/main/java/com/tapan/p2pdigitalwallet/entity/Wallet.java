@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Objects;
 
 @Entity
 @Table(name = "wallets",
@@ -66,11 +67,6 @@ public class Wallet {
         this.updatedAt = Instant.now();
     }
 
-
-    public void setBalance(BigDecimal balance) {
-        this.balance = balance;
-    }
-
     public void setStatus(WalletStatus status) {
         this.status = status;
     }
@@ -102,5 +98,29 @@ public class Wallet {
 
     public Long getId() {
         return id;
+    }
+
+    public void debit(BigDecimal amount){
+        Objects.requireNonNull(amount, "Amount is required");
+
+        if(amount.signum() <= 0){
+            throw new IllegalArgumentException("Debit amount must be greater than zero");
+        }
+
+        if(balance.compareTo(amount) < 0){
+            throw new IllegalArgumentException("Insufficient Wallet Balance");
+        }
+
+        this.balance = this.balance.subtract(amount);
+    }
+
+    public void credit(BigDecimal amount){
+        Objects.requireNonNull(amount, "Amount is required");
+
+        if(amount.signum() <= 0){
+            throw new IllegalArgumentException("Credit amount must be greater than zero");
+        }
+
+        this.balance = this.balance.add(amount);
     }
 }

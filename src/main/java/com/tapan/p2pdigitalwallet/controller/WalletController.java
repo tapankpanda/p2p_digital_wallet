@@ -1,9 +1,6 @@
 package com.tapan.p2pdigitalwallet.controller;
 
-import com.tapan.p2pdigitalwallet.dto.BalanceResponse;
-import com.tapan.p2pdigitalwallet.dto.CreateWalletRequest;
-import com.tapan.p2pdigitalwallet.dto.TransactionResponse;
-import com.tapan.p2pdigitalwallet.dto.WalletResponse;
+import com.tapan.p2pdigitalwallet.dto.*;
 import com.tapan.p2pdigitalwallet.service.WalletService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -68,6 +65,14 @@ public class WalletController {
         Pageable pageable = PageRequest.of(page, size);
 
         return walletService.getTransactions(accountNumber, pageable);
+    }
+
+    @PostMapping("/transfer")
+    public ResponseEntity<TransferResponse> transfer(
+            @Valid @RequestBody TransferRequest request
+    ){
+        TransferResponse response = walletService.transfer(request);
+        return ResponseEntity.ok(response);
     }
 
 }

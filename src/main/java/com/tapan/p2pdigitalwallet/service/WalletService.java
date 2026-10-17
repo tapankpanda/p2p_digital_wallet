@@ -1,13 +1,7 @@
 package com.tapan.p2pdigitalwallet.service;
 
-import com.tapan.p2pdigitalwallet.dto.BalanceResponse;
-import com.tapan.p2pdigitalwallet.dto.CreateWalletRequest;
-import com.tapan.p2pdigitalwallet.dto.TransactionResponse;
-import com.tapan.p2pdigitalwallet.dto.WalletResponse;
-import com.tapan.p2pdigitalwallet.entity.Transaction;
-import com.tapan.p2pdigitalwallet.entity.TransactionType;
-import com.tapan.p2pdigitalwallet.entity.User;
-import com.tapan.p2pdigitalwallet.entity.Wallet;
+import com.tapan.p2pdigitalwallet.dto.*;
+import com.tapan.p2pdigitalwallet.entity.*;
 import com.tapan.p2pdigitalwallet.repository.TransactionRepository;
 import com.tapan.p2pdigitalwallet.repository.UserRepository;
 import com.tapan.p2pdigitalwallet.repository.WalletRepository;
@@ -23,6 +17,9 @@ import java.util.UUID;
 
 @Service
 public class WalletService {
+
+    private static final BigDecimal MAX_TRANSFER_AMOUNT =
+            new BigDecimal("999999999999999.99");
 
     private final UserRepository userRepository;
     private final WalletRepository walletRepository;
@@ -55,7 +52,8 @@ public class WalletService {
             accountNumber = accountNumberGenerator.generate();
         }
 
-        Wallet wallet = walletRepository.save(new Wallet(user, accountNumber, request.initialBalance()));
+        Wallet wallet = walletRepository
+                .save(new Wallet(user, accountNumber, request.initialBalance()));
 
         // Record initial funding only when the amount is positive
         if(request.initialBalance().signum() > 0){
@@ -75,34 +73,124 @@ public class WalletService {
 
     }
 
-
+    // Retrieve wallet details
     @Transactional(readOnly = true)
     public WalletResponse getWallet(String accountNumber){
-        Wallet wallet =  walletRepository.findByAccountNumber(accountNumber)
+        Wallet wallet =  walletRepository
+                .findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new RuntimeException("Wallet not found"));
         return WalletResponse.from(wallet);
     }
 
-
+    // Retrieve wallet balance
     @Transactional (readOnly = true)
     public BalanceResponse getBalance(String accountNumber){
-        Wallet wallet = walletRepository.findByAccountNumber(accountNumber)
+        Wallet wallet = walletRepository
+                .findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new RuntimeException("Wallet not found"));
         return BalanceResponse.from(wallet);
     }
 
-
+    // Retrieve paginated transaction history
     @Transactional(readOnly = true)
     public Page<TransactionResponse> getTransactions(
             String accountNumber,
             Pageable pageable
     ) {
-        Wallet wallet = walletRepository.findByAccountNumber(accountNumber)
+        Wallet wallet = walletRepository
+                .findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new RuntimeException("Wallet not found"));
 
         return transactionRepository
                 .findByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId(), pageable)
                 .map(TransactionResponse::from);
     }
+
+    // Transfer money between two wallets
+    @Transactional
+    public TransferResponse transfer(TransferRequest request){
+
+        BigDecimal amount = request.amount();
+
+        if(amount == null || amount.signum() <= 0){
+            throw new IllegalArgumentException("Transfer amount must be greater than zero");
+        }
+
+        if (amount.compareTo(MAX_TRANSFER_AMOUNT) > 0
+                || amount.stripTrailingZeros().scale() > 2) {
+            throw new IllegalArgumentException(
+                    "Amount must have at most 15 integer digits and 2 decimal places"
+            );
+        }
+
+        if(request.fromAccountNumber()
+                .equals(request.toAccountNumber())){
+            throw new IllegalArgumentException("Source and destination must be different");
+        }
+
+        Wallet sender = walletRepository
+                .findByAccountNumber(request.fromAccountNumber())
+                .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
+
+        Wallet receiver = walletRepository
+                .findByAccountNumber(request.toAccountNumber())
+                .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+
+        if(sender.getStatus() != WalletStatus.ACTIVE){
+            throw new IllegalArgumentException("Sender wallet is not active");
+        }
+
+        if(receiver.getStatus() != WalletStatus.ACTIVE){
+            throw new IllegalArgumentException("Receiver wallet is not active");
+        }
+
+        // Preserve the original balances before changing them
+        BigDecimal senderBalanceBefore = sender.getBalance();
+        BigDecimal receiverBalanceBefore = receiver.getBalance();
+
+        sender.debit(amount);
+        receiver.credit(amount);
+
+        BigDecimal senderBalanceAfter = sender.getBalance();
+        BigDecimal receiverBalanceAfter = receiver.getBalance();
+
+        String referenceId = UUID.randomUUID().toString();
+
+        Transaction debitTransaction = new Transaction(
+                referenceId,
+                sender,
+                TransactionType.DEBIT,
+                amount,
+                senderBalanceBefore,
+                senderBalanceAfter,
+                request.description()
+        );
+
+        Transaction creditTransaction = new Transaction(
+                referenceId,
+                receiver,
+                TransactionType.CREDIT,
+                amount,
+                receiverBalanceBefore,
+                receiverBalanceAfter,
+                request.description()
+        );
+
+        walletRepository.save(sender);
+        walletRepository.save(receiver);
+
+        transactionRepository.save(debitTransaction);
+        transactionRepository.save(creditTransaction);
+
+        return new TransferResponse(
+                referenceId,
+                sender.getAccountNumber(),
+                receiver.getAccountNumber(),
+                amount,
+                request.description(),
+                "SUCCESS"
+        );
+    }
+
 
 }
