@@ -128,13 +128,44 @@ public class WalletService {
             throw new IllegalArgumentException("Source and destination must be different");
         }
 
-        Wallet sender = walletRepository
-                .findByAccountNumber(request.fromAccountNumber())
+        // Get only the IDs before locking either wallet
+        Long senderId = walletRepository
+                .findIdByAccountNumber(request.fromAccountNumber())
                 .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
 
-        Wallet receiver = walletRepository
-                .findByAccountNumber(request.toAccountNumber())
+        Long receiverId = walletRepository
+                .findIdByAccountNumber(request.toAccountNumber())
                 .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+
+        Wallet firstLocked;
+        Wallet secondLocked;
+
+        // Lock wallets in ascending ID order to reduce deadlock risk
+        if(senderId <receiverId){
+            firstLocked = walletRepository
+                    .findByIdForUpdate(senderId)
+                    .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
+
+            secondLocked = walletRepository
+                    .findByIdForUpdate(receiverId)
+                    .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+        }
+        else{
+            firstLocked = walletRepository
+                    .findByIdForUpdate(receiverId)
+                    .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+
+            secondLocked = walletRepository
+                    .findByIdForUpdate(senderId)
+                    .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
+        }
+
+        // Map the locked wallets back to sender and receiver
+        Wallet sender = firstLocked.getId()
+                .equals(senderId) ? firstLocked : secondLocked;
+
+        Wallet receiver = firstLocked.getId()
+                .equals(receiverId) ? firstLocked : secondLocked;
 
         if(sender.getStatus() != WalletStatus.ACTIVE){
             throw new IllegalArgumentException("Sender wallet is not active");
