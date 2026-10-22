@@ -1,5 +1,6 @@
 package com.tapan.p2pdigitalwallet.entity;
 
+import com.tapan.p2pdigitalwallet.exception.InsufficientBalanceException;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
@@ -108,7 +109,7 @@ public class Wallet {
         }
 
         if(balance.compareTo(amount) < 0){
-            throw new IllegalArgumentException("Insufficient Wallet Balance");
+            throw new InsufficientBalanceException("Insufficient Wallet Balance");
         }
 
         this.balance = this.balance.subtract(amount);

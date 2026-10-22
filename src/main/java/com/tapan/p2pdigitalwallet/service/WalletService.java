@@ -2,6 +2,8 @@ package com.tapan.p2pdigitalwallet.service;
 
 import com.tapan.p2pdigitalwallet.dto.*;
 import com.tapan.p2pdigitalwallet.entity.*;
+import com.tapan.p2pdigitalwallet.exception.ConflictException;
+import com.tapan.p2pdigitalwallet.exception.ResourceNotFoundException;
 import com.tapan.p2pdigitalwallet.repository.TransactionRepository;
 import com.tapan.p2pdigitalwallet.repository.UserRepository;
 import com.tapan.p2pdigitalwallet.repository.WalletRepository;
@@ -43,7 +45,7 @@ public class WalletService {
     public WalletResponse createWallet(CreateWalletRequest request){
         String email = User.normalizeEmail(request.email());
         if(userRepository.existsByEmail(email)){
-            throw new RuntimeException("A user with this email already has a wallet.");
+            throw new ConflictException("A user with this email already has a wallet.");
         }
         User user = userRepository.save(new User(request.fullName().trim(), email));
 
@@ -78,7 +80,8 @@ public class WalletService {
     public WalletResponse getWallet(String accountNumber){
         Wallet wallet =  walletRepository
                 .findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new RuntimeException("Wallet not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
         return WalletResponse.from(wallet);
     }
 
@@ -87,7 +90,8 @@ public class WalletService {
     public BalanceResponse getBalance(String accountNumber){
         Wallet wallet = walletRepository
                 .findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new RuntimeException("Wallet not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
         return BalanceResponse.from(wallet);
     }
 
@@ -99,7 +103,8 @@ public class WalletService {
     ) {
         Wallet wallet = walletRepository
                 .findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new RuntimeException("Wallet not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
 
         return transactionRepository
                 .findByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId(), pageable)
@@ -131,11 +136,13 @@ public class WalletService {
         // Get only the IDs before locking either wallet
         Long senderId = walletRepository
                 .findIdByAccountNumber(request.fromAccountNumber())
-                .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Sender wallet not found"));
 
         Long receiverId = walletRepository
                 .findIdByAccountNumber(request.toAccountNumber())
-                .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Receiver wallet not found"));
 
         Wallet firstLocked;
         Wallet secondLocked;
@@ -144,20 +151,24 @@ public class WalletService {
         if(senderId <receiverId){
             firstLocked = walletRepository
                     .findByIdForUpdate(senderId)
-                    .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Sender wallet not found"));
 
             secondLocked = walletRepository
                     .findByIdForUpdate(receiverId)
-                    .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Receiver wallet not found"));
         }
         else{
             firstLocked = walletRepository
                     .findByIdForUpdate(receiverId)
-                    .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Receiver wallet not found"));
 
             secondLocked = walletRepository
                     .findByIdForUpdate(senderId)
-                    .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Sender wallet not found"));
         }
 
         // Map the locked wallets back to sender and receiver
