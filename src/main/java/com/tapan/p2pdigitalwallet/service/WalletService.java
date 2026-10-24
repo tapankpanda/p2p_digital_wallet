@@ -4,16 +4,19 @@ import com.tapan.p2pdigitalwallet.dto.*;
 import com.tapan.p2pdigitalwallet.entity.*;
 import com.tapan.p2pdigitalwallet.exception.ConflictException;
 import com.tapan.p2pdigitalwallet.exception.ResourceNotFoundException;
+import com.tapan.p2pdigitalwallet.repository.IdempotencyRecordRepository;
 import com.tapan.p2pdigitalwallet.repository.TransactionRepository;
 import com.tapan.p2pdigitalwallet.repository.UserRepository;
 import com.tapan.p2pdigitalwallet.repository.WalletRepository;
 import com.tapan.p2pdigitalwallet.util.AccountNumberGenerator;
+import com.tapan.p2pdigitalwallet.util.TransferRequestHasher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 
@@ -27,17 +30,20 @@ public class WalletService {
     private final WalletRepository walletRepository;
     private final AccountNumberGenerator accountNumberGenerator;
     private final TransactionRepository transactionRepository;
+    private final IdempotencyRecordRepository idempotencyRecordRepository;
 
     public WalletService(
             UserRepository userRepository,
             WalletRepository walletRepository,
             AccountNumberGenerator accountNumberGenerator,
-            TransactionRepository transactionRepository
+            TransactionRepository transactionRepository,
+            IdempotencyRecordRepository idempotencyRecordRepository
     ) {
         this.userRepository = userRepository;
         this.walletRepository = walletRepository;
         this.accountNumberGenerator = accountNumberGenerator;
         this.transactionRepository = transactionRepository;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
     }
 
 
@@ -113,8 +119,18 @@ public class WalletService {
 
     // Transfer money between two wallets
     @Transactional
-    public TransferResponse transfer(TransferRequest request){
+    public TransferResponse transfer(
+            String idempotencyKey,
+            TransferRequest request){
 
+        // validate the idempotency key
+        if(idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 100){
+            throw new IllegalArgumentException(
+                    "Idempotency key must contain between 1 and 100 characters"
+            );
+        }
+
+        // validate the amount before hashing the request
         BigDecimal amount = request.amount();
 
         if(amount == null || amount.signum() <= 0){
@@ -131,6 +147,30 @@ public class WalletService {
         if(request.fromAccountNumber()
                 .equals(request.toAccountNumber())){
             throw new IllegalArgumentException("Source and destination must be different");
+        }
+
+        // Create a hash of the request to detect duplicate or modified requests
+        String requestHash = TransferRequestHasher.hash(request);
+
+        var existingRecord = idempotencyRecordRepository
+                .findByIdempotencyKey(idempotencyKey);
+
+        // Return the previous result if this transfer has already been processed
+        if(existingRecord.isPresent()){
+            IdempotencyRecord record = existingRecord.get();
+
+            if(!record.getRequestHash().equals(requestHash)){
+                throw new ConflictException(
+                        "Idempotency key has already been used with a different request"
+                );
+            }
+
+            if(!"SUCCESS".equals(record.getStatus())){
+                throw new ConflictException(
+                        "The previous request did not complete successfully"
+                );
+            }
+            return getOriginalTransferResponse(record);
         }
 
         // Get only the IDs before locking either wallet
@@ -198,6 +238,7 @@ public class WalletService {
 
         String referenceId = UUID.randomUUID().toString();
 
+        // Create matching debit and credit ledger entries
         Transaction debitTransaction = new Transaction(
                 referenceId,
                 sender,
@@ -224,6 +265,16 @@ public class WalletService {
         transactionRepository.save(debitTransaction);
         transactionRepository.save(creditTransaction);
 
+        // Store the idempotency record to prevent duplicate transfers on retries
+        idempotencyRecordRepository.save(
+                new IdempotencyRecord(
+                        idempotencyKey,
+                        requestHash,
+                        referenceId,
+                        "SUCCESS"
+                )
+        );
+
         return new TransferResponse(
                 referenceId,
                 sender.getAccountNumber(),
@@ -234,5 +285,37 @@ public class WalletService {
         );
     }
 
+    // Reconstruct the original response for a retry
+    private TransferResponse getOriginalTransferResponse(
+            IdempotencyRecord record
+    ) {
+        List<Transaction> transactions =
+                transactionRepository.findByReferenceId(
+                        record.getReferenceId()
+                );
+
+        Transaction debit = transactions.stream()
+                .filter(t -> t.getTransactionType() == TransactionType.DEBIT)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Original transfer debit transaction was not found"
+                ));
+
+        Transaction credit = transactions.stream()
+                .filter(t -> t.getTransactionType() == TransactionType.CREDIT)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Original transfer credit transaction was not found"
+                ));
+
+        return new TransferResponse(
+                record.getReferenceId(),
+                debit.getWallet().getAccountNumber(),
+                credit.getWallet().getAccountNumber(),
+                debit.getAmount(),
+                debit.getDescription(),
+                record.getStatus()
+        );
+    }
 
 }

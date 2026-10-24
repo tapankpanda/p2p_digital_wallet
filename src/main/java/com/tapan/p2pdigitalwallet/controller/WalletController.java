@@ -69,11 +69,12 @@ public class WalletController {
 
     @PostMapping("/transfer")
     public ResponseEntity<TransferResponse> transfer(
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody TransferRequest request
     ){
-        TransferResponse response = walletService.transfer(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(
+                walletService.transfer(idempotencyKey, request)
+        );
     }
-
 }
 
