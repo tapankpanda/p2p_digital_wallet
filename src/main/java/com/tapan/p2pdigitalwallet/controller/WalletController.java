@@ -1,6 +1,7 @@
 package com.tapan.p2pdigitalwallet.controller;
 
 import com.tapan.p2pdigitalwallet.dto.*;
+import com.tapan.p2pdigitalwallet.entity.WalletStatus;
 import com.tapan.p2pdigitalwallet.service.WalletService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -75,6 +76,23 @@ public class WalletController {
         return ResponseEntity.ok(
                 walletService.transfer(idempotencyKey, request)
         );
+    }
+
+    @PutMapping("/{accountNumber}/status")
+    public WalletResponse updateWalletStatus(
+            @PathVariable String accountNumber,
+            @RequestParam WalletStatus status
+    ){
+        validateAccountNumber(accountNumber);
+        return walletService.updateWalletStatus(accountNumber, status);
+    }
+
+    @PatchMapping("/{accountNumber}/close")
+    public WalletResponse closeWallet(
+            @PathVariable String accountNumber
+    ){
+        validateAccountNumber(accountNumber);
+        return walletService.closeWallet(accountNumber);
     }
 }
 

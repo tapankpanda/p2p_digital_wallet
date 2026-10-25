@@ -318,4 +318,68 @@ public class WalletService {
         );
     }
 
+    // Freeze or reactivate a wallet
+    @Transactional
+    public WalletResponse updateWalletStatus(
+            String accountNumber,
+            WalletStatus newStatus
+    ){
+        if(newStatus == null){
+            throw new IllegalArgumentException("Wallet status is required");
+        }
+
+        if(newStatus == WalletStatus.CLOSED){
+            throw new IllegalArgumentException(
+                    "Use the close-wallet operation to close a wallet"
+            );
+        }
+
+        Long walletId = walletRepository
+                .findIdByAccountNumber(accountNumber)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
+
+        Wallet wallet = walletRepository
+                .findByIdForUpdate(walletId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
+
+        if(wallet.getStatus() == WalletStatus.CLOSED){
+            throw new ConflictException("A closed wallet can not be reactivated or modified");
+        }
+
+        wallet.setStatus(newStatus);
+        walletRepository.saveAndFlush(wallet);
+
+        return WalletResponse.from(wallet);
+    }
+
+    // close a wallet without deleting its transaction history
+    @Transactional
+    public WalletResponse closeWallet(String accountNumber){
+        Long walletId = walletRepository
+                .findIdByAccountNumber(accountNumber)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
+
+        Wallet wallet = walletRepository
+                .findByIdForUpdate(walletId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Wallet not found"));
+
+        if(wallet.getStatus() == WalletStatus.CLOSED){
+            throw new ConflictException("Wallet is already closed");
+        }
+
+        if(wallet.getBalance().compareTo(BigDecimal.ZERO) != 0){
+            throw new ConflictException(
+                    "Wallet must have a zero balance before it can be closed"
+            );
+        }
+
+        wallet.setStatus(WalletStatus.CLOSED);
+        walletRepository.saveAndFlush(wallet);
+
+        return WalletResponse.from(wallet);
+    }
 }
