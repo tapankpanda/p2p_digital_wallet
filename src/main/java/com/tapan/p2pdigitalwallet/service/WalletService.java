@@ -4,6 +4,8 @@ import com.tapan.p2pdigitalwallet.dto.*;
 import com.tapan.p2pdigitalwallet.entity.*;
 import com.tapan.p2pdigitalwallet.exception.ConflictException;
 import com.tapan.p2pdigitalwallet.exception.ResourceNotFoundException;
+import com.tapan.p2pdigitalwallet.exception.WalletClosedException;
+import com.tapan.p2pdigitalwallet.exception.WalletFrozenException;
 import com.tapan.p2pdigitalwallet.repository.IdempotencyRecordRepository;
 import com.tapan.p2pdigitalwallet.repository.TransactionRepository;
 import com.tapan.p2pdigitalwallet.repository.UserRepository;
@@ -218,12 +220,20 @@ public class WalletService {
         Wallet receiver = firstLocked.getId()
                 .equals(receiverId) ? firstLocked : secondLocked;
 
-        if(sender.getStatus() != WalletStatus.ACTIVE){
-            throw new IllegalArgumentException("Sender wallet is not active");
+        if (sender.getStatus() == WalletStatus.FROZEN) {
+            throw new WalletFrozenException("Sender wallet is frozen");
         }
 
-        if(receiver.getStatus() != WalletStatus.ACTIVE){
-            throw new IllegalArgumentException("Receiver wallet is not active");
+        if (sender.getStatus() == WalletStatus.CLOSED) {
+            throw new WalletClosedException("Sender wallet is closed");
+        }
+
+        if (receiver.getStatus() == WalletStatus.FROZEN) {
+            throw new WalletFrozenException("Receiver wallet is frozen");
+        }
+
+        if (receiver.getStatus() == WalletStatus.CLOSED) {
+            throw new WalletClosedException("Receiver wallet is closed");
         }
 
         // Preserve the original balances before changing them
@@ -345,7 +355,9 @@ public class WalletService {
                         new ResourceNotFoundException("Wallet not found"));
 
         if(wallet.getStatus() == WalletStatus.CLOSED){
-            throw new ConflictException("A closed wallet can not be reactivated or modified");
+            throw new WalletClosedException(
+                    "A closed wallet can not be reactivated or modified"
+            );
         }
 
         wallet.setStatus(newStatus);
@@ -368,7 +380,7 @@ public class WalletService {
                         new ResourceNotFoundException("Wallet not found"));
 
         if(wallet.getStatus() == WalletStatus.CLOSED){
-            throw new ConflictException("Wallet is already closed");
+            throw new WalletClosedException("Wallet is already closed");
         }
 
         if(wallet.getBalance().compareTo(BigDecimal.ZERO) != 0){
