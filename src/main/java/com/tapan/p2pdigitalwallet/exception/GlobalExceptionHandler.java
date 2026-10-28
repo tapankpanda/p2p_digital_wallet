@@ -53,18 +53,6 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(InsufficientBalanceException.class)
-    public ResponseEntity<ErrorResponse> handleInsufficientBalanceException(
-            InsufficientBalanceException exception,
-            HttpServletRequest request) {
-
-        return buildErrorResponse(
-                HttpStatus.BAD_REQUEST,
-                exception.getMessage(),
-                request
-        );
-    }
-
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFoundException(
             ResourceNotFoundException exception,
@@ -72,6 +60,18 @@ public class GlobalExceptionHandler {
 
         return buildErrorResponse(
                 HttpStatus.NOT_FOUND,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(InsufficientBalanceException.class)
+    public ResponseEntity<ErrorResponse> handleInsufficientBalanceException(
+            InsufficientBalanceException exception,
+            HttpServletRequest request) {
+
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
                 exception.getMessage(),
                 request
         );

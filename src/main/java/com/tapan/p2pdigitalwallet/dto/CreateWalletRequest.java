@@ -22,4 +22,9 @@ public record CreateWalletRequest(
         BigDecimal initialBalance
 
 ) {
+        public CreateWalletRequest {
+                if (fullName != null) {
+                        fullName = fullName.trim();
+                }
+        }
 }
