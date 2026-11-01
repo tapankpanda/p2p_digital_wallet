@@ -94,6 +94,34 @@ class P2pDigitalWalletApplicationTests {
         );
     }
 
+    private long countTransactionEntries(
+            String accountNumber,
+            String referenceId
+    ) throws Exception {
+
+        MvcResult result = mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/transactions",
+                                accountNumber)
+                                .param("page", "0")
+                                .param("size", "100"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode content = jsonMapper
+                .readTree(result.getResponse().getContentAsString())
+                .path("content");
+
+        long count = 0;
+
+        for (JsonNode entry : content) {
+            if (referenceId.equals(entry.path("referenceId").asText())) {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     private void assertMoneyEquals(String expected, JsonNode actual) {
         assertEquals(
                 0,
@@ -263,6 +291,34 @@ class P2pDigitalWalletApplicationTests {
                         receiverAccount))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(700.0));
+
+        // Verify that exactly one debit entry exists for the transfer.
+        assertEquals(
+                1L,
+                countTransactionEntries(senderAccount, originalReferenceId),
+                "The sender should have exactly one debit entry"
+        );
+
+        // Verify that exactly one credit entry exists for the transfer.
+        assertEquals(
+                1L,
+                countTransactionEntries(receiverAccount, originalReferenceId),
+                "The receiver should have exactly one credit entry"
+        );
+
+        // Verify the transaction types.
+        JsonNode debitEntry = findTransactionEntry(
+                senderAccount,
+                originalReferenceId
+        );
+
+        JsonNode creditEntry = findTransactionEntry(
+                receiverAccount,
+                originalReferenceId
+        );
+
+        assertEquals("DEBIT", debitEntry.path("type").asText());
+        assertEquals("CREDIT", creditEntry.path("type").asText());
     }
 
     @Test
@@ -835,6 +891,171 @@ class P2pDigitalWalletApplicationTests {
             start.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void frozenWalletShouldNotBeAllowedToSendMoney()
+            throws Exception {
+
+        // Arrange: create a funded sender and an empty receiver.
+        String senderAccount = createWallet(
+                "Frozen Sender",
+                "frozen.sender@example.com",
+                "500.00"
+        );
+
+        String receiverAccount = createWallet(
+                "Frozen Receiver",
+                "frozen.receiver@example.com",
+                "0.00"
+        );
+
+        // Freeze the sender wallet.
+        mockMvc.perform(
+                        put("/api/wallet/{accountNumber}/status",
+                                senderAccount)
+                                .param("status", "FROZEN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+
+        String transferRequest = """
+    {
+        "fromAccountNumber": "%s",
+        "toAccountNumber": "%s",
+        "amount": 100.00,
+        "description": "Transfer from frozen wallet test"
+    }
+    """.formatted(senderAccount, receiverAccount);
+
+        // Act: attempt to transfer money from the frozen wallet.
+        mockMvc.perform(
+                        post("/api/wallet/transfer")
+                                .header(
+                                        "Idempotency-Key",
+                                        "frozen-sender-test-001"
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(transferRequest))
+                .andExpect(status().isConflict());
+
+        // Assert: sender balance must remain unchanged.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                senderAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(500.0));
+
+        // Assert: receiver must not receive any money.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                receiverAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(0.0));
+
+        // Assert: sender must remain frozen.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", senderAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+    }
+
+    @Test
+    void frozenWalletShouldNotBeAllowedToReceiveMoney()
+            throws Exception {
+
+        // Arrange: create an active sender with sufficient balance.
+        String senderAccount = createWallet(
+                "Active Transfer Sender",
+                "active.transfer.sender@example.com",
+                "500.00"
+        );
+
+        // Arrange: create an empty receiver.
+        String receiverAccount = createWallet(
+                "Frozen Transfer Receiver",
+                "frozen.transfer.receiver@example.com",
+                "0.00"
+        );
+
+        // Freeze the receiver wallet.
+        mockMvc.perform(
+                        put("/api/wallet/{accountNumber}/status",
+                                receiverAccount)
+                                .param("status", "FROZEN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+
+        String transferRequest = """
+    {
+        "fromAccountNumber": "%s",
+        "toAccountNumber": "%s",
+        "amount": 100.00,
+        "description": "Transfer to frozen wallet test"
+    }
+    """.formatted(senderAccount, receiverAccount);
+
+        // Act: attempt to transfer money to the frozen wallet.
+        mockMvc.perform(
+                        post("/api/wallet/transfer")
+                                .header(
+                                        "Idempotency-Key",
+                                        "frozen-receiver-test-001"
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(transferRequest))
+                .andExpect(status().isConflict());
+
+        // Assert: sender balance must remain unchanged.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                senderAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(500.0));
+
+        // Assert: receiver balance must remain unchanged.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                receiverAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(0.0));
+
+        // Assert: receiver must remain frozen.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", receiverAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+    }
+
+    @Test
+    void invalidWalletStatusShouldBeRejected()
+            throws Exception {
+
+        // Arrange: create a wallet.
+        String accountNumber = createWallet(
+                "Invalid Status Test User",
+                "invalid.status@example.com",
+                "500.00"
+        );
+
+        // Act: attempt to set an unsupported wallet status.
+        mockMvc.perform(
+                        put("/api/wallet/{accountNumber}/status",
+                                accountNumber)
+                                .param("status", "BLOCKED"))
+                .andExpect(status().isBadRequest());
+
+        // Assert: wallet status should remain ACTIVE.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        // Assert: wallet balance should remain unchanged.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(500.0));
     }
 
 }
