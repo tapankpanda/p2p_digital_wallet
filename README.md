@@ -38,6 +38,7 @@ The project demonstrates transactional processing, pessimistic database locking,
 | Swagger UI | Interactive API exploration |
 | Maven Wrapper | Build and dependency management |
 | JUnit 5 and Spring Boot Test | Automated testing |
+| H2 Database | In-memory database for integration testing |
 
 ## Architecture
 
@@ -184,7 +185,7 @@ Replace the placeholders with your local MySQL credentials. If your database use
 
 ### 3. Run the Automated Tests
 
-Configure the database before running the tests because the application-context test loads the Spring application.
+The automated tests use an in-memory H2 database through the `test` profile. A running MySQL server or local MySQL credentials are not required to execute the test suite.
 
 **Windows**
 
@@ -280,13 +281,58 @@ The response contains the account number and current balance.
 
 **Endpoint:** `GET /api/wallet/{accountNumber}/transactions?page=0&size=20`
 
-Pagination rules:
+Retrieves a wallet's transaction history using pagination.
+
+**Pagination rules:**
 
 - Page numbering starts at `0`.
 - The default page size is `20`.
 - The permitted page size is between `1` and `100`.
+- Transactions are ordered by creation time in descending order, with transaction ID as a secondary descending sort key.
 
-Transaction records include the transaction ID, reference ID, account number, transaction type, amount, balance snapshots, description, and creation timestamp.
+**Response format:**
+
+The endpoint returns a stable paginated response containing transaction records and pagination metadata.
+
+Example response when no transactions are available:
+
+```json
+{
+  "content": [],
+  "page": 0,
+  "size": 20,
+  "numberOfElements": 0,
+  "totalElements": 0,
+  "totalPages": 0,
+  "first": true,
+  "last": true,
+  "empty": true
+}
+```
+
+**Pagination metadata:**
+
+| Field | Description |
+|---|---|
+| `content` | Transaction records for the current page |
+| `page` | Current page number, starting at 0 |
+| `size` | Requested page size |
+| `numberOfElements` | Number of records on the current page |
+| `totalElements` | Total number of transactions |
+| `totalPages` | Total number of available pages |
+| `first` | Indicates whether this is the first page |
+| `last` | Indicates whether this is the last page |
+| `empty` | Indicates whether the current page contains no records |
+
+When transactions are available, the `content` array contains transaction objects with the transaction ID, reference ID, account number, transaction type, amount, balance before and after the transaction, description, and creation timestamp.
+
+**Example request:**
+
+```http
+GET /api/wallet/123456789012/transactions?page=0&size=20
+```
+
+The response uses a dedicated `PageResponse` DTO to maintain a predictable JSON structure.
 
 ### 5. Transfer Money
 
@@ -384,9 +430,20 @@ The OpenAPI specification documents the expected success and client-error respon
 
 ### Automated Tests
 
-The current automated test suite contains one Spring Boot application-context test. It verifies that the application context loads successfully.
+The project includes eight automated integration tests using Spring Boot Test, MockMvc, and an in-memory H2 database.
 
-It does not independently verify transfer behavior, concurrency safety, or all endpoint responses.
+The tests cover:
+
+- Successful wallet creation and response details
+- Rejection of negative initial balances
+- Successful P2P transfers and correct wallet balance updates
+- Idempotent retries without duplicate transfers
+- Insufficient funds without changing wallet balances
+- Rejection of different requests using an already-used idempotency key
+- Matching debit and credit ledger entries with correct balance snapshots
+- Stable pagination response structure and metadata
+
+The test profile uses an in-memory H2 database, keeping automated tests isolated from the local MySQL development database.
 
 Run the suite using:
 
@@ -401,6 +458,8 @@ mvnw.cmd clean test
 ```bash
 ./mvnw clean test
 ```
+
+The current suite does not yet cover every API endpoint, all wallet lifecycle scenarios, or concurrent idempotency-key requests.
 
 ### Manual API Checks
 

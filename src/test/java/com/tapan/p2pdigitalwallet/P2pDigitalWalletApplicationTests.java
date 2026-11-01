@@ -429,4 +429,32 @@ class P2pDigitalWalletApplicationTests {
         assertMoneyEquals("700.00", credit.path("balanceAfter"));
     }
 
+    @Test
+    void transactionHistoryShouldReturnStablePaginationMetadata()
+            throws Exception {
+
+        // Arrange: create a wallet with initial funding.
+        String accountNumber = createWallet(
+                "Pagination Test User",
+                "pagination.test@example.com",
+                "1000.00"
+        );
+
+        // Act and assert: retrieve the first transaction page.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/transactions",
+                                accountNumber)
+                                .param("page", "0")
+                                .param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.numberOfElements").value(1))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(true))
+                .andExpect(jsonPath("$.empty").value(false));
+    }
 }

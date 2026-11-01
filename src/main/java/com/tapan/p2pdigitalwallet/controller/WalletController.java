@@ -11,7 +11,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -164,7 +163,7 @@ public class WalletController {
             )
     })
     @GetMapping("/{accountNumber}/transactions")
-    public Page<TransactionResponse> getTransactions(
+    public PageResponse<TransactionResponse> getTransactions(
             @PathVariable String accountNumber,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
@@ -181,7 +180,9 @@ public class WalletController {
 
         Pageable pageable = PageRequest.of(page, size);
 
-        return walletService.getTransactions(accountNumber, pageable);
+        return PageResponse.from(
+                walletService.getTransactions(accountNumber, pageable)
+        );
     }
 
 
