@@ -12,11 +12,19 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -457,4 +465,376 @@ class P2pDigitalWalletApplicationTests {
                 .andExpect(jsonPath("$.last").value(true))
                 .andExpect(jsonPath("$.empty").value(false));
     }
+
+    @Test
+    void walletStatusShouldSupportFreezeAndReactivation()
+            throws Exception {
+
+        // Arrange: create a wallet.
+        String accountNumber = createWallet(
+                "Lifecycle Test User",
+                "lifecycle.status@example.com",
+                "0.00"
+        );
+
+        // Act: freeze the wallet.
+        mockMvc.perform(
+                        put("/api/wallet/{accountNumber}/status",
+                                accountNumber)
+                                .param("status", "FROZEN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+
+        // Assert: verify that the frozen status was persisted.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+
+        // Act: reactivate the frozen wallet.
+        mockMvc.perform(
+                        put("/api/wallet/{accountNumber}/status",
+                                accountNumber)
+                                .param("status", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        // Assert: verify that the active status was persisted.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void walletWithZeroBalanceShouldBeClosedSuccessfully()
+            throws Exception {
+
+        // Arrange: create a wallet with zero balance.
+        String accountNumber = createWallet(
+                "Zero Balance Closure User",
+                "zero.closure@example.com",
+                "0.00"
+        );
+
+        // Act: close the wallet.
+        mockMvc.perform(
+                        patch("/api/wallet/{accountNumber}/close",
+                                accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+
+        // Assert: verify that the CLOSED status was persisted.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+    }
+
+    @Test
+    void walletWithNonZeroBalanceShouldNotBeClosed()
+            throws Exception {
+
+        // Arrange: create a wallet with a positive balance.
+        String accountNumber = createWallet(
+                "Non Zero Closure User",
+                "nonzero.closure@example.com",
+                "500.00"
+        );
+
+        // Act: attempt to close the wallet.
+        mockMvc.perform(
+                        patch("/api/wallet/{accountNumber}/close",
+                                accountNumber))
+                .andExpect(status().isConflict());
+
+        // Assert: verify that the wallet remains ACTIVE.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        // Assert: verify that its balance remains unchanged.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(500.0));
+    }
+
+    @Test
+    void closedWalletShouldNotBeReactivated()
+            throws Exception {
+
+        // Arrange: create and close a zero-balance wallet.
+        String accountNumber = createWallet(
+                "Closed Wallet User",
+                "closed.reactivation@example.com",
+                "0.00"
+        );
+
+        mockMvc.perform(
+                        patch("/api/wallet/{accountNumber}/close",
+                                accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+
+        // Act: attempt to reactivate the closed wallet.
+        mockMvc.perform(
+                        put("/api/wallet/{accountNumber}/status",
+                                accountNumber)
+                                .param("status", "ACTIVE"))
+                .andExpect(status().isConflict());
+
+        // Assert: the wallet must remain CLOSED.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+    }
+
+    @Test
+    void transferToClosedWalletShouldBeRejected()
+            throws Exception {
+
+        // Arrange: create a funded sender.
+        String senderAccount = createWallet(
+                "Closed Wallet Transfer Sender",
+                "closed.transfer.sender@example.com",
+                "500.00"
+        );
+
+        // Arrange: create and close the receiver.
+        String receiverAccount = createWallet(
+                "Closed Wallet Receiver",
+                "closed.transfer.receiver@example.com",
+                "0.00"
+        );
+
+        mockMvc.perform(
+                        patch("/api/wallet/{accountNumber}/close",
+                                receiverAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+
+        String transferRequest = """
+        {
+            "fromAccountNumber": "%s",
+            "toAccountNumber": "%s",
+            "amount": 100.00,
+            "description": "Transfer to closed wallet test"
+        }
+        """.formatted(senderAccount, receiverAccount);
+
+        // Act: attempt to transfer money to the closed wallet.
+        mockMvc.perform(
+                        post("/api/wallet/transfer")
+                                .header(
+                                        "Idempotency-Key",
+                                        "closed-receiver-test-001"
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(transferRequest))
+                .andExpect(status().isConflict());
+
+        // Assert: neither wallet's balance should change.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                senderAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(500.0));
+
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                receiverAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(0.0));
+
+        // Assert: the receiver must remain CLOSED.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", receiverAccount))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+    }
+
+    @Test
+    void concurrentTransfersShouldNotOverspendSenderWallet()
+            throws Exception {
+
+        // Arrange: create one sender with 100 and two empty receivers.
+        String senderAccount = createWallet(
+                "Concurrent Sender",
+                "concurrent.sender@example.com",
+                "100.00"
+        );
+
+        String receiverOne = createWallet(
+                "Concurrent Receiver One",
+                "concurrent.receiver.one@example.com",
+                "0.00"
+        );
+
+        String receiverTwo = createWallet(
+                "Concurrent Receiver Two",
+                "concurrent.receiver.two@example.com",
+                "0.00"
+        );
+
+        String requestOne = """
+        {
+            "fromAccountNumber": "%s",
+            "toAccountNumber": "%s",
+            "amount": 80.00,
+            "description": "First concurrent transfer"
+        }
+        """.formatted(senderAccount, receiverOne);
+
+        String requestTwo = """
+        {
+            "fromAccountNumber": "%s",
+            "toAccountNumber": "%s",
+            "amount": 80.00,
+            "description": "Second concurrent transfer"
+        }
+        """.formatted(senderAccount, receiverTwo);
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+
+            // Arrange: prepare the first concurrent request.
+            Future<MvcResult> firstTransfer = executor.submit(() -> {
+                ready.countDown();
+
+                if (!start.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException(
+                            "First transfer did not receive the start signal"
+                    );
+                }
+
+                return mockMvc.perform(
+                                post("/api/wallet/transfer")
+                                        .header(
+                                                "Idempotency-Key",
+                                                "concurrent-transfer-001"
+                                        )
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(requestOne))
+                        .andReturn();
+            });
+
+            // Arrange: prepare the second concurrent request.
+            Future<MvcResult> secondTransfer = executor.submit(() -> {
+                ready.countDown();
+
+                if (!start.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException(
+                            "Second transfer did not receive the start signal"
+                    );
+                }
+
+                return mockMvc.perform(
+                                post("/api/wallet/transfer")
+                                        .header(
+                                                "Idempotency-Key",
+                                                "concurrent-transfer-002"
+                                        )
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(requestTwo))
+                        .andReturn();
+            });
+
+            // Wait until both requests are ready.
+            if (!ready.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError(
+                        "Both transfer requests were not ready"
+                );
+            }
+
+            // Release both requests at approximately the same time.
+            start.countDown();
+
+            // Collect both responses.
+            int firstStatus = firstTransfer
+                    .get(20, TimeUnit.SECONDS)
+                    .getResponse()
+                    .getStatus();
+
+            int secondStatus = secondTransfer
+                    .get(20, TimeUnit.SECONDS)
+                    .getResponse()
+                    .getStatus();
+
+            // Exactly one transfer should succeed.
+            assertTrue(
+                    (firstStatus == 200 && secondStatus == 409)
+                            || (firstStatus == 409 && secondStatus == 200),
+                    () -> "Expected one successful transfer and one conflict, "
+                            + "but received HTTP statuses: "
+                            + firstStatus + " and " + secondStatus
+            );
+
+            // Assert: the sender must have exactly 20 remaining.
+            MvcResult senderBalanceResult = mockMvc.perform(
+                            get("/api/wallet/{accountNumber}/balance",
+                                    senderAccount))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            JsonNode senderBalance = jsonMapper.readTree(
+                    senderBalanceResult.getResponse().getContentAsString()
+            ).path("balance");
+
+            assertMoneyEquals("20.00", senderBalance);
+
+            // Retrieve both receiver balances.
+            MvcResult receiverOneResult = mockMvc.perform(
+                            get("/api/wallet/{accountNumber}/balance",
+                                    receiverOne))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            MvcResult receiverTwoResult = mockMvc.perform(
+                            get("/api/wallet/{accountNumber}/balance",
+                                    receiverTwo))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            BigDecimal receiverOneBalance = jsonMapper.readTree(
+                    receiverOneResult.getResponse().getContentAsString()
+            ).path("balance").decimalValue();
+
+            BigDecimal receiverTwoBalance = jsonMapper.readTree(
+                    receiverTwoResult.getResponse().getContentAsString()
+            ).path("balance").decimalValue();
+
+            // Exactly one receiver should receive 80.
+            boolean firstReceivedMoney =
+                    receiverOneBalance.compareTo(new BigDecimal("80.00")) == 0;
+
+            boolean secondReceivedMoney =
+                    receiverTwoBalance.compareTo(new BigDecimal("80.00")) == 0;
+
+            assertTrue(
+                    firstReceivedMoney ^ secondReceivedMoney,
+                    "Exactly one receiver should receive 80.00"
+            );
+
+            // Verify that the total money received is exactly 80.
+            assertEquals(
+                    0,
+                    new BigDecimal("80.00").compareTo(
+                            receiverOneBalance.add(receiverTwoBalance)
+                    )
+            );
+
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+    }
+
 }
