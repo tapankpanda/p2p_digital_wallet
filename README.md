@@ -4,10 +4,7 @@ A backend REST API built with **Java 21, Spring Boot, and MySQL** for digital wa
 
 The project demonstrates transactional processing, pessimistic database locking, idempotency handling, ledger-style transaction records, request validation, and wallet lifecycle management.
 
-[![Java](https://img.shields.io/badge/Java-21-orange)](https://www.oracle.com/java/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen)](https://spring.io/projects/spring-boot)
-[![MySQL](https://img.shields.io/badge/Database-MySQL-blue)](https://www.mysql.com/)
-[![API](https://img.shields.io/badge/API-REST-informational)](https://restfulapi.net/)
+[![Java](https://img.shields.io/badge/Java-21-orange)](https://www.oracle.com/java/) [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen)](https://spring.io/projects/spring-boot) [![MySQL](https://img.shields.io/badge/Database-MySQL-blue)](https://www.mysql.com/) [![API](https://img.shields.io/badge/API-REST-informational)](https://restfulapi.net/)
 
 ## Features
 
@@ -32,13 +29,13 @@ The project demonstrates transactional processing, pessimistic database locking,
 | Spring Web MVC | REST API development |
 | Spring Data JPA | Data access and persistence |
 | Hibernate ORM | Object-relational mapping |
-| MySQL | Relational database |
+| MySQL | Development database |
+| H2 Database | In-memory database for integration testing |
 | Jakarta Bean Validation | Request validation |
 | Springdoc OpenAPI 3.1.1 | OpenAPI specification and documentation integration |
 | Swagger UI | Interactive API exploration |
 | Maven Wrapper | Build and dependency management |
 | JUnit 5 and Spring Boot Test | Automated testing |
-| H2 Database | In-memory database for integration testing |
 
 ## Architecture
 
@@ -65,8 +62,6 @@ flowchart TD
     OpenAPI -->|API Documentation| Swagger["Swagger UI / OpenAPI Specification"]
     Client -.->|Explore and Test API| Swagger
 ```
-
-
 
 ### Main Components
 
@@ -218,7 +213,6 @@ mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev
 The default local base URL is:
 
 `http://localhost:8080`
-
 
 ## API Documentation
 
@@ -430,20 +424,35 @@ The OpenAPI specification documents the expected success and client-error respon
 
 ### Automated Tests
 
-The project includes eight automated integration tests using Spring Boot Test, MockMvc, and an in-memory H2 database.
+The project currently includes **21 automated integration tests** using Spring Boot Test, MockMvc, and an in-memory H2 database.
 
 The tests cover:
 
-- Successful wallet creation and response details
-- Rejection of negative initial balances
-- Successful P2P transfers and correct wallet balance updates
-- Idempotent retries without duplicate transfers
-- Insufficient funds without changing wallet balances
-- Rejection of different requests using an already-used idempotency key
-- Matching debit and credit ledger entries with correct balance snapshots
-- Stable pagination response structure and metadata
+1. Successful wallet creation and response details.
+2. Rejection of negative initial balances.
+3. Retrieval of existing wallet details, including customer information, balance, status, and timestamps.
+4. Rejection of wallet-detail retrieval for a correctly formatted but nonexistent account number.
+5. Retrieval of the correct wallet balance.
+6. Rejection of balance retrieval for a correctly formatted but nonexistent account number.
+7. Successful P2P transfers and correct wallet balance updates.
+8. Idempotent retries without duplicate transfers, including verification that only one debit and one credit ledger entry are created.
+9. Insufficient funds without changing wallet balances.
+10. Rejection of different requests using an already-used idempotency key.
+11. Matching debit and credit ledger entries with correct balance snapshots.
+12. Stable pagination response structure and metadata.
+13. Freezing and reactivating wallets.
+14. Closing a wallet with zero balance.
+15. Rejection of closing a wallet with a nonzero balance.
+16. Rejection of reactivating a closed wallet.
+17. Rejection of transfers to closed wallets.
+18. Concurrent transfers with different idempotency keys without overspending the sender wallet.
+19. Rejection of outgoing transfers from frozen wallets.
+20. Rejection of incoming transfers to frozen wallets.
+21. Rejection of invalid wallet status values.
 
 The test profile uses an in-memory H2 database, keeping automated tests isolated from the local MySQL development database.
+
+**Latest test verification:** 21 tests run, 0 failures, 0 errors, and 0 skipped.
 
 Run the suite using:
 
@@ -459,37 +468,39 @@ mvnw.cmd clean test
 ./mvnw clean test
 ```
 
-The current suite does not yet cover every API endpoint, all wallet lifecycle scenarios, or concurrent idempotency-key requests.
+**Important concurrency distinction:** The suite tests sequential idempotent retries and concurrent transfers using different idempotency keys. Simultaneous requests using the same new idempotency key have not yet been covered by an automated test.
 
 ### Manual API Checks
 
 Manual API checks have been performed for scenarios including:
 
-- Successful transfers
-- Idempotent retries
-- Insufficient balance and invalid transfer amounts
-- Frozen-wallet behavior
-- Wallet closure rules
-- Pagination and invalid inputs
+- Successful transfers.
+- Idempotent retries.
+- Insufficient balance and invalid transfer amounts.
+- Frozen-wallet behavior.
+- Wallet closure rules.
+- Pagination and invalid inputs.
 
 These manual checks are separate from the automated test suite.
 
 ### Recommended Future Tests
 
-- Automated integration tests for all API endpoints
-- Verification that wallet updates, ledger entries, and idempotency records roll back together on failure
-- Concurrent transfers involving the same wallet
-- Simultaneous requests using the same new idempotency key
-- Wallet lifecycle and validation edge cases
-- Database uniqueness conflicts and error mapping
+- Additional transfer validation tests, including missing idempotency keys, invalid amounts, nonexistent wallets, and same-wallet transfers.
+- Transaction-history tests for empty results, invalid pagination parameters, and nonexistent wallets.
+- Verification that wallet updates, ledger entries, and idempotency records roll back together on failure.
+- Simultaneous requests using the same new idempotency key.
+- Additional concurrent transfer scenarios involving shared wallets.
+- Further database uniqueness-conflict and error-mapping scenarios.
+- Additional wallet lifecycle edge cases.
 
 ## Current Limitations and Future Improvements
 
 This is an academic and demonstration project, not a production-ready financial service.
 
-Potential improvements include:
+Current limitations and potential improvements include:
 
 - Add authentication and authorization.
+- Ensure wallet operations are restricted to their respective owners after authentication is introduced.
 - Expand automated integration and concurrency testing.
 - Handle simultaneous idempotency-key conflicts with a predictable client-facing response.
 - Introduce database schema migrations with Flyway or Liquibase instead of relying on `ddl-auto=update`.
@@ -500,16 +511,16 @@ Potential improvements include:
 
 ## What This Project Demonstrates
 
-- REST API design using Spring Web MVC
-- Layered backend architecture
-- Relational persistence using Spring Data JPA and MySQL
-- Transaction management and pessimistic locking
-- Idempotency and transaction-ledger design
-- Monetary validation using `BigDecimal`
-- Wallet lifecycle and business-rule enforcement
-- Centralized exception handling
-- OpenAPI documentation
-- Practical awareness of testing and concurrency limitations
+- REST API design using Spring Web MVC.
+- Layered backend architecture.
+- Relational persistence using Spring Data JPA and MySQL.
+- Transaction management and pessimistic locking.
+- Idempotency and transaction-ledger design.
+- Monetary validation using `BigDecimal`.
+- Wallet lifecycle and business-rule enforcement.
+- Centralized exception handling.
+- OpenAPI documentation.
+- Practical awareness of testing and concurrency limitations.
 
 ## Disclaimer
 

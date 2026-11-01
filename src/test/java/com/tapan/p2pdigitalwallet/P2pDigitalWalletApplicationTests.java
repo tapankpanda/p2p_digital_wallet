@@ -1058,4 +1058,79 @@ class P2pDigitalWalletApplicationTests {
                 .andExpect(jsonPath("$.balance").value(500.0));
     }
 
+
+    @Test
+    void getWalletShouldReturnWalletDetails() throws Exception {
+
+        // Arrange: create a wallet with known details.
+        String accountNumber = createWallet(
+                "Wallet Retrieval User",
+                "wallet.retrieval@example.com",
+                "750.50"
+        );
+
+        // Act and assert: retrieve the wallet and verify its details.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(
+                        MediaType.APPLICATION_JSON
+                ))
+                .andExpect(jsonPath("$.accountNumber")
+                        .value(accountNumber))
+                .andExpect(jsonPath("$.fullName")
+                        .value("Wallet Retrieval User"))
+                .andExpect(jsonPath("$.email")
+                        .value("wallet.retrieval@example.com"))
+                .andExpect(jsonPath("$.balance")
+                        .value(750.50))
+                .andExpect(jsonPath("$.status")
+                        .value("ACTIVE"))
+                .andExpect(jsonPath("$.createdAt").exists())
+                .andExpect(jsonPath("$.updatedAt").exists());
+    }
+
+    @Test
+    void getWalletShouldReturnNotFoundForInvalidAccountNumber()
+            throws Exception {
+
+        // Act and assert: request a wallet that does not exist.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}", "999999999999"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getWalletBalanceShouldReturnCorrectBalance()
+            throws Exception {
+
+        // Arrange: create a wallet with a known balance.
+        String accountNumber = createWallet(
+                "Balance Retrieval User",
+                "balance.retrieval@example.com",
+                "925.75"
+        );
+
+        // Act and assert: retrieve and verify the wallet balance.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(
+                        MediaType.APPLICATION_JSON
+                ))
+                .andExpect(jsonPath("$.balance").value(925.75));
+    }
+
+    @Test
+    void getWalletBalanceShouldReturnNotFoundForInvalidAccountNumber()
+            throws Exception {
+
+        // Act and assert: request the balance of a wallet that does not exist.
+        mockMvc.perform(
+                        get("/api/wallet/{accountNumber}/balance",
+                                "999999999999"))
+                .andExpect(status().isNotFound());
+    }
+
 }
